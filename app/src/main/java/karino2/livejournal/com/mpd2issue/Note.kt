@@ -34,8 +34,8 @@ import java.util.Date
 "nbformat":4,"nbformat_minor":0}
  */
 
-data class Note(var cells: List<Cell>? = null,
-                var metadata: JsonElement? = null
+data class Note(val cells: List<Cell>? = null,
+                val metadata: JsonElement? = null
 ) {
 
     companion object {

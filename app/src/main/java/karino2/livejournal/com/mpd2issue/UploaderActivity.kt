@@ -126,51 +126,77 @@ class UploaderActivity : AppCompatActivity() {
 
     }
 
-    private fun postToIssueInternal(fname : String, apiUri: String, note: Note?) {
-        val client = OkHttpClient()
+    fun postRest(client: OkHttpClient, issueUrl: String, note: Note) : List<Response> {
+        return note.cells!!.slice(1 until note.cells.size)
+                .filter { it.cellType == Cell.CellType.MARKDOWN } // now image is not supported yet.
+                .map {
+                    cell ->
+                    val reqBody = requestBodyBuilder {
+                        beginObject()
+                            .name("body").value(cell.source)
+                            .endObject()
+                    }
 
-        val token = prefs.getString("access_token", "")
+                    val request = requestWithTokenBuilder()
+                            .url(issueUrl+"/comments")
+                            .post(reqBody)
+                            .build()
+                    client.newCall(request).execute()
+                }
+    }
 
-        val valid = ((note != null) and (note!!.cells != null) and (note!!.cells!!.size > 0 )
-                and (note!!.cells!![0].cellType == Cell.CellType.MARKDOWN))
+    val jsonMedia by lazy {MediaType.parse("application/json")}
 
-        val body = if(valid) note!!.cells!![0].source else ""
-
-        val jsonMedia = MediaType.parse("application/json")
+    fun requestBodyBuilder(builder: JsonWriter.()->Unit) : RequestBody {
         val sw = StringWriter()
         val jw = JsonWriter(sw)
-        jw.beginObject()
+        jw.builder()
+        val jsonstr = sw.toString()
+        return RequestBody.create(jsonMedia, jsonstr)
+    }
+
+    val token : String by lazy { prefs.getString("access_token", "") }
+
+    fun requestWithTokenBuilder() = Request.Builder().addHeader("Authorization", "token $token")
+
+
+    private fun postToIssueInternal(fname : String, apiUri: String, note: Note?) {
+        if((note == null) or (note!!.cells == null) or (note.cells!!.isEmpty())) {
+            showMessage("Null note. wrong ipynb format.")
+            return
+        }
+        if (note.cells[0].cellType != Cell.CellType.MARKDOWN) {
+            showMessage("Initial cell is not markdown. NYI.")
+            return
+        }
+
+        val client = OkHttpClient()
+
+        val body = note.cells[0].source
+
+        val reqBody = requestBodyBuilder {
+            beginObject()
                 .name("title").value(fname)
                 .name("body").value(body)
                 .endObject()
-        val jsonstr = sw.toString()
-        val reqBody = RequestBody.create(jsonMedia, jsonstr)
 
-        /*
-        val form = FormBody.Builder()
-                .add("title", fname)
-                .add("body", body)
-                .build()
+        }
 
-                .post(form)
-
-
-        */
-
-        val request = Request.Builder()
+        val request = requestWithTokenBuilder()
                 .url(apiUri)
-                .addHeader("Authorization", "token $token")
-                .addHeader("Content-Type", "application/json")
                 .post(reqBody)
                 .build()
 
         Single.fromCallable { client.newCall(request).execute() }
-                .map { resp -> resp.body()!!.string()}
-                .subscribeOn(Schedulers.io())
+                .map {
+                    resp -> resp.header("Location")!!
+                }
+                .map { postRest(client, it, note) }
+                .subscribeOn(Schedulers.single())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe {
-                    respBody ->
-                    showMessage(respBody)
+                    resps ->
+                    showMessage("resps size: ${resps.size}")
                 }
 
     }

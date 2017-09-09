@@ -21,28 +21,27 @@ import java.io.IOException
 
 data class Cell(
         @SerializedName("cell_type")
-        var _cellType: String,
+        val _cellType: String,
         @SerializedName("source")
-                var _source: JsonElement,
-        var executionCount: Int? = null,
-        var metadata: JsonElement? = null,
+        val _source: JsonElement,
+        val executionCount: Int? = null,
+        val metadata: JsonElement? = null,
         // always 1 element.
-        var outputs: MutableList<Output>? = null) {
+        val outputs: MutableList<Output>? = null) {
 
-    var source: String
+    val source: String
             get() = jsonElementToString(_source)
-            set(newContent) { _source = JsonPrimitive(newContent) }
 
 
-    data class Output(var name: String = "",
+    data class Output(val name: String = "",
                       // (name, _text) or _data
-                      var outputType: String? = null,
-                      @SerializedName("_text")
-                      var _text: JsonElement? = null,
-                      @SerializedName("_data")
-                      var _data: Map<String, JsonElement>? = null,
+                      val outputType: String? = null,
+                      @SerializedName("text")
+                      val _text: JsonElement? = null,
+                      @SerializedName("data")
+                      val _data: Map<String, JsonElement>? = null,
 
-                      var executionCount: Int? = null
+                      val executionCount: Int? = null
     ) {
 
 
@@ -58,12 +57,14 @@ data class Cell(
                 return false
             }
 
+        /*
         fun setData(newData: JsonObject) {
             val dataType = object : TypeToken<Map<String, JsonElement>>() {
 
             }.type
             _data = s_gson.fromJson<Map<String, JsonElement>>(newData, dataType)
         }
+        */
 
         val imageAsBase64: String?
             get() {
@@ -86,6 +87,7 @@ data class Cell(
 
     }
 
+    /*
     fun clearOutput() {
         outputs!!.clear()
         val newoutput = Output()
@@ -94,6 +96,7 @@ data class Cell(
         newoutput._text = JsonArray()
         outputs!!.add(newoutput)
     }
+    */
 
     internal val output: Output?
         get() = if (outputs!!.isEmpty()) null else outputs!![0]
@@ -104,7 +107,7 @@ data class Cell(
         MARKDOWN
     }
 
-    var cellType: CellType
+    val cellType: CellType
         get() {
             return if ("code" == _cellType) {
                 CellType.CODE
@@ -112,13 +115,6 @@ data class Cell(
                 CellType.MARKDOWN
             } else {
                 CellType.UNINITIALIZE
-            }
-        }
-        set(newType) {
-            when (newType) {
-                Cell.CellType.CODE -> _cellType = "code"
-                Cell.CellType.MARKDOWN -> _cellType = "markdown"
-                else -> throw IllegalArgumentException("Unknown cell type: " + newType)
             }
         }
 
