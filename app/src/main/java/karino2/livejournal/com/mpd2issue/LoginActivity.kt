@@ -95,7 +95,7 @@ class LoginActivity : AppCompatActivity() {
     val authorizeUrl: String
         get() =
         "https://github.com/login/oauth/authorize?client_id=${getString(R.string.client_id)}" +
-                  "&scope=user&redirect_uri=${getString(R.string.redirect_uri)}"
+                  "&scope=public_repo&redirect_uri=${getString(R.string.redirect_uri)}"
 
 
     internal inner class CheckTokenValidity(val accessToken: String, val resultListener: (String)->Unit, val onError:(String)->Unit) : AsyncTask<Any, String, Boolean>() {

@@ -20,7 +20,7 @@ import java.io.IOException
  */
 
 data class Cell(
-        @SerializedName("_cellType")
+        @SerializedName("cell_type")
         var _cellType: String,
         @SerializedName("source")
                 var _source: JsonElement,

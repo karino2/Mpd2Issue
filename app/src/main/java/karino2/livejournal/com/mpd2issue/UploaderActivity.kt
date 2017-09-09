@@ -9,11 +9,19 @@ import android.net.Uri
 import android.widget.EditText
 import java.io.File
 import android.widget.Toast
+import com.google.gson.stream.JsonWriter
 import io.reactivex.Single
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.schedulers.Schedulers
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import okhttp3.*
+import java.io.StringWriter
+
+fun String?.baseName() : String? {
+    if(this == null)
+        return null
+    val pos = this.lastIndexOf(".")
+    return if(pos == -1) null else this.substring(0, pos)
+}
 
 
 class UploaderActivity : AppCompatActivity() {
@@ -108,7 +116,7 @@ class UploaderActivity : AppCompatActivity() {
         val inputStream = file!!.inputStream()
         try {
             val note = Note.fromJson(inputStream)
-            postToIssueInternal(apiUri, note)
+            postToIssueInternal(file!!.name.baseName() ?: "dummy",  apiUri, note)
 
 
         } finally {
@@ -118,18 +126,51 @@ class UploaderActivity : AppCompatActivity() {
 
     }
 
-    private fun postToIssueInternal(apiUri: String, note: Note) {
-        // get for debug first.
+    private fun postToIssueInternal(fname : String, apiUri: String, note: Note?) {
         val client = OkHttpClient()
-        val request = Request.Builder().url(apiUri).build()
+
+        val token = prefs.getString("access_token", "")
+
+        val valid = ((note != null) and (note!!.cells != null) and (note!!.cells!!.size > 0 )
+                and (note!!.cells!![0].cellType == Cell.CellType.MARKDOWN))
+
+        val body = if(valid) note!!.cells!![0].source else ""
+
+        val jsonMedia = MediaType.parse("application/json")
+        val sw = StringWriter()
+        val jw = JsonWriter(sw)
+        jw.beginObject()
+                .name("title").value(fname)
+                .name("body").value(body)
+                .endObject()
+        val jsonstr = sw.toString()
+        val reqBody = RequestBody.create(jsonMedia, jsonstr)
+
+        /*
+        val form = FormBody.Builder()
+                .add("title", fname)
+                .add("body", body)
+                .build()
+
+                .post(form)
+
+
+        */
+
+        val request = Request.Builder()
+                .url(apiUri)
+                .addHeader("Authorization", "token $token")
+                .addHeader("Content-Type", "application/json")
+                .post(reqBody)
+                .build()
 
         Single.fromCallable { client.newCall(request).execute() }
                 .map { resp -> resp.body()!!.string()}
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe {
-                    body ->
-                    showMessage(body)
+                    respBody ->
+                    showMessage(respBody)
                 }
 
     }

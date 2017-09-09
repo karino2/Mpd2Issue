@@ -8,6 +8,7 @@ package karino2.livejournal.com.mpd2issue
 import com.google.gson.FieldNamingPolicy
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
+import com.google.gson.JsonElement
 
 import java.io.BufferedReader
 import java.io.IOException
@@ -19,26 +20,27 @@ import java.util.Date
  * Created by _ on 2017/05/24.
  */
 
-data class Note(    var name: String? = null,
-                    var path: String? = null,
-                    var lastModified: Date? = null,
-                    var created: Date? = null,
-                    var content: Content? = null,
-                    var format: String? = null,
-                    var mimetype: String? = null,
-                    var writable: Boolean = false,
-                    var type: String? = null
+
+/*
+{"cells":
+[{"cell_type":"markdown","metadata":{},"source":["Hello. This is test."]}],
+"metadata":{"kernelspec":{"display_name":"Python 2","language":"python","name":"python2"},
+    "lanbuage_info":{"codemirror_mode":
+                        {"name":"ipython","version":2},
+                        "file_extension":".py","mimetype":"text/x-python",
+                        "name":"python","nbconvert_exporter":"python","pygments_lexer":"ipython2","version":"2.7.11"
+                    }
+            },
+"nbformat":4,"nbformat_minor":0}
+ */
+
+data class Note(var cells: List<Cell>? = null,
+                var metadata: JsonElement? = null
 ) {
-
-
-    class Content {
-        var cells: List<Cell>? = null
-
-    }
 
     companion object {
 
-        fun fromJson(buf: String): Note {
+        fun fromJson(buf: String): Note? {
             val gson = gson
             return gson.fromJson(buf, Note::class.java)
         }
@@ -51,7 +53,7 @@ data class Note(    var name: String? = null,
         }
 
         @Throws(IOException::class)
-        fun fromJson(inputStream: InputStream): Note {
+        fun fromJson(inputStream: InputStream): Note? {
             // JsonReader reader = new JsonReader(new InputStreamReader(inputStream, "UTF-8"));
             val json = readAll(inputStream)
             return fromJson(json)
