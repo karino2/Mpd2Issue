@@ -27,7 +27,7 @@ data class Cell(
         val executionCount: Int? = null,
         val metadata: JsonElement? = null,
         // always 1 element.
-        val outputs: MutableList<Output>? = null) {
+        val outputs: List<Output>? = null) {
 
     val source: String
             get() = jsonElementToString(_source)
@@ -66,15 +66,21 @@ data class Cell(
         }
         */
 
-        val imageAsBase64: String?
+        data class Base64Image(val key: String, val content: String)
+
+        val base64Image : Base64Image?
             get() {
                 for (key in _data!!.keys) {
                     if (key.startsWith("image/png") || key.startsWith("image/jpeg")) {
-                        return jsonElementToString(_data!![key])
+                        return Base64Image(key, jsonElementToString(_data!![key]))
                     }
                 }
                 return null
+
             }
+
+        val imageAsBase64: String?
+            get() = base64Image?.content
 
         val text : String
             get() = if (_data == null) jsonElementToString(_text) else jsonElementToString(_data!!["_text/plain"])
