@@ -18,7 +18,6 @@ import io.reactivex.Single
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.schedulers.Schedulers
 import okhttp3.*
-import org.jsoup.Jsoup
 import java.io.StringWriter
 
 fun String?.baseName() : String? {
@@ -150,19 +149,15 @@ class UploaderActivity : AppCompatActivity() {
         return client.newCall(request).execute()
     }
 
-    data class AssetJson(val uploadUrl: String,
-                         val header : JsonElement,
-                         val asset: JsonElement,
-                         val form: JsonObject,
-                         val assetUploadUrl: String)
 
-    data class ImagePutResult(val href: String)
+    data class ImgurData(val link: String)
+    data class ImgurResult(val data: ImgurData)
 
     data class NullableResponse(val response : Response?)
 
 
 
-    fun postImageCell(client: OkHttpClient, issueWithToken: IssueWithUploadToken, cell : Cell, index: Int) : NullableResponse {
+    fun postImageCell(client: OkHttpClient, issueUrl: String, cell : Cell, index: Int) : NullableResponse {
         if(cell.output == null) {
             Log.d("Mpd2Issue", "Null output of image cell. Invalid. skip")
             return NullableResponse(null)
@@ -174,7 +169,6 @@ class UploaderActivity : AppCompatActivity() {
             return NullableResponse(null)
         }
 
-        val issueUrl = issueWithToken.url
         val imagebytes = Base64.decode(image.content, Base64.DEFAULT)
 
         val issueId = Uri.parse(issueUrl).lastPathSegment
@@ -182,51 +176,29 @@ class UploaderActivity : AppCompatActivity() {
         val imageExt = if(image.key.startsWith("image/png")) "png" else "jpg"
         val imageFileName = "${issueId}_${index}.${imageExt}"
 
-        val firstForm = FormBody.Builder()
-                .add("name", imageFileName)
-                .add("size", imagebytes.size.toString())
-                .add("content_type", image.key)
-                .add("authenticity_token", issueWithToken.authentityToken)
+        val imgurRequestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("title", "Mpd2Issue images")
+                .addFormDataPart("image", imageFileName,
+                        RequestBody.create(MediaType.parse(image.key), imagebytes))
                 .build()
 
-        // need to add authenticity_token here.
 
-
-
-        val firstRequest = requestWithTokenBuilder()
-                .url("https://github.com/upload/policies/assets")
-                .post(firstForm)
+        val imgurRequest = requestWithTokenBuilder()
+                .url("https://api.imgur.com/3/image")
+                .header("Authorization", "Client-ID ${getString(R.string.imgur_client_id)}")
+                .post(imgurRequestBody)
                 .build()
 
-        val firstResp = client.newCall(firstRequest).execute()
+        val imgurResp = client.newCall(imgurRequest).execute()
 
         val gson = Note.gson
-        val firstRespBody = firstResp.body()!!.string()
-        val assetResp = gson.fromJson(firstRespBody, AssetJson::class.java)
-
-        val secondBuilder = MultipartBody.Builder()
-        for(entry in assetResp.form.entrySet()) {
-            secondBuilder.addFormDataPart(entry.key, entry.value.asString)
-        }
-
-        val imageBody = RequestBody.create(MediaType.parse(image.key), imagebytes)
-        val secondForm = secondBuilder.addFormDataPart("file", imageFileName,imageBody)
-        val secondRequest = requestWithTokenBuilder()
-                .url(assetResp.uploadUrl)
-                .post(firstForm)
-                .build()
-        val secondResp = client.newCall(secondRequest).execute()
-
-        val thirdRequest = requestWithTokenBuilder()
-                .url(assetResp.assetUploadUrl)
-                .post(FormBody.Builder().build())
-                .build()
-        val thirdResp = client.newCall(thirdRequest).execute()
-        val putResult = gson.fromJson(thirdResp.body()!!.string(), ImagePutResult::class.java)
+        val imgurRespBody = imgurResp.body()!!.string()
+        val imgurResult = gson.fromJson(imgurRespBody, ImgurResult::class.java)
 
         val md = StringBuilder()
                 .append("![](")
-                .append(putResult.href)
+                .append(imgurResult.data.link)
                 .append(")")
                 .toString()
 
@@ -234,18 +206,18 @@ class UploaderActivity : AppCompatActivity() {
 
     }
 
-    fun postCell(client: OkHttpClient, issueWithToken: IssueWithUploadToken, cell: Cell, index: Int) : NullableResponse {
+    fun postCell(client: OkHttpClient, issueUrl: String, cell: Cell, index: Int) : NullableResponse {
         if(cell.cellType == Cell.CellType.CODE) {
-            return postImageCell(client, issueWithToken, cell, index)
+            return postImageCell(client, issueUrl, cell, index)
         }
-        return  NullableResponse(postMarkdownCell(client, issueWithToken.url+"/comments", cell))
+        return  NullableResponse(postMarkdownCell(client, issueUrl+"/comments", cell))
     }
 
-    fun postRest(client: OkHttpClient, issueWithToken: IssueWithUploadToken, note: Note) : List<Response> {
+    fun postRest(client: OkHttpClient, issueUrl: String, note: Note) : List<Response> {
         return note.cells!!.slice(1 until note.cells.size)
                 .filter { cell -> (cell.cellType == Cell.CellType.MARKDOWN) or (cell.cellType == Cell.CellType.CODE) }
                 .mapIndexed {
-                    index, cell -> postCell(client, issueWithToken, cell, index)
+                    index, cell -> postCell(client, issueUrl, cell, index)
                 }
                 .filter { resp -> resp.response != null }
                 .map { resp->resp.response!!}
@@ -265,37 +237,6 @@ class UploaderActivity : AppCompatActivity() {
 
     fun requestWithTokenBuilder() = Request.Builder().addHeader("Authorization", "token $token")
 
-    data class IssueWithUploadToken(val url: String, val authentityToken: String)
-
-    fun scrapeAuthenticityToken(client: OkHttpClient, issueUrl: String) : IssueWithUploadToken {
-
-        // https://api.github.com/repos/karino2/karino2.github.io/issues/11
-        // -> https://github.com/karino2/karino2.github.io/issues/11
-        val segs = Uri.parse(issueUrl).pathSegments
-        // remove repos
-        val relative = segs.slice(1 until segs.size).joinToString("/")
-
-        val url = StringBuilder()
-                .append("https://github.com/")
-                .append(relative)
-                .toString()
-
-        val request = requestWithTokenBuilder()
-                .url(url)
-                .get()
-                .build()
-
-        val resp = client.newCall(request).execute()
-
-        val bodyStr = resp.body()!!.string()
-        val selected = Jsoup.parse(bodyStr).select("div[data-upload-policy-authenticity-token]")
-        val div = selected.first()
-        val uploadToken = div.attr("data-upload-policy-authenticity-token")
-
-
-        // val uploadToken = Jsoup.parse(resp.body()!!.string()).select("div[data-upload-policy-authenticity-token]").first().attr("data-upload-policy-authenticity-token")
-        return IssueWithUploadToken(issueUrl, uploadToken)
-    }
 
     private fun postToIssueInternal(fname : String, apiUri: String, note: Note?) {
         if((note == null) or (note!!.cells == null) or (note.cells!!.isEmpty())) {
@@ -326,7 +267,7 @@ class UploaderActivity : AppCompatActivity() {
 
         Single.fromCallable { client.newCall(request).execute() }
                 .map {
-                    resp -> scrapeAuthenticityToken(client, resp.header("Location")!!)
+                    resp -> resp.header("Location")!!
                 }
                 .map { postRest(client, it, note) }
                 .subscribeOn(Schedulers.single())
