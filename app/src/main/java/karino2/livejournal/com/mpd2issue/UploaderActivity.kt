@@ -19,6 +19,13 @@ import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.schedulers.Schedulers
 import okhttp3.*
 import java.io.StringWriter
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.R.id.edit
+import android.content.Context
+import android.content.Intent
+import android.support.v7.app.NotificationCompat
+
 
 fun String?.baseName() : String? {
     if(this == null)
@@ -55,6 +62,8 @@ class UploaderActivity : AppCompatActivity() {
 
     }
 
+    var duringPost = false
+
     fun showMessage(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
 
@@ -65,9 +74,17 @@ class UploaderActivity : AppCompatActivity() {
         return super.onCreateOptionsMenu(menu)
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.menu_item_post).setEnabled(!duringPost)
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when(item.itemId) {
             R.id.menu_item_post -> {
+                showMessage("posting...")
+                duringPost = true
+                invalidateOptionsMenu()
                 postToIssue()
                 return true
             }
@@ -237,14 +254,20 @@ class UploaderActivity : AppCompatActivity() {
 
     fun requestWithTokenBuilder() = Request.Builder().addHeader("Authorization", "token $token")
 
+    fun enablePost() {
+        duringPost = false
+        invalidateOptionsMenu()
+    }
 
     private fun postToIssueInternal(fname : String, apiUri: String, note: Note?) {
         if((note == null) or (note!!.cells == null) or (note.cells!!.isEmpty())) {
             showMessage("Null note. wrong ipynb format.")
+            enablePost()
             return
         }
         if (note.cells[0].cellType != Cell.CellType.MARKDOWN) {
             showMessage("Initial cell is not markdown. NYI.")
+            enablePost()
             return
         }
 
@@ -269,13 +292,48 @@ class UploaderActivity : AppCompatActivity() {
                 .map {
                     resp -> resp.header("Location")!!
                 }
-                .map { postRest(client, it, note) }
+                .map { Pair(it, postRest(client, it, note)) }
                 .subscribeOn(Schedulers.single())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe {
-                    resps ->
-                    showMessage("resps size: ${resps.size}")
+                    (issueUrl, resps) ->
+
+                    val webUrl = apiUrlToWebUrl(issueUrl)
+                    showUrlNotification(webUrl)
+                    enablePost()
+                    showMessage("done.")
+                    finish()
                 }
+
+    }
+
+    fun apiUrlToWebUrl(issueApiUrl : String) : String {
+        // https://api.github.com/repos/karino2/karino2.github.io/issues/13 -> https://github.com/karino2/karino2.github.io/issues/13
+        val uri = Uri.parse(issueApiUrl)
+        val segs = uri.pathSegments
+        val ownerStart = segs.size - 4
+        val afterOwner = segs.slice(ownerStart until segs.size).joinToString("/")
+        return "https://github.com/$afterOwner"
+    }
+
+    val NOTIFICATION_ID = 1
+
+    private fun showUrlNotification(url: String) {
+        val builder = NotificationCompat.Builder(this)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("GistIpynb")
+                .setContentText(url)
+
+        val intent = Intent(Intent.ACTION_VIEW)
+        intent.data = Uri.parse(url)
+
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+        // builder.addAction(android.R.drawable.ic_menu_edit, "Copy", pendingIntent);
+        builder.setContentIntent(pendingIntent)
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, builder.build())
+
 
     }
 
