@@ -126,8 +126,25 @@ class UploaderActivity : AppCompatActivity() {
         }
 
         if(pathSegs.last() != "issues") {
-            showMessage("NYI: update existing issue")
-            return
+            try {
+                val issueNum = Integer.parseInt(pathSegs.last())
+                val owner = pathSegs[pathSegs.size-4]
+                val repoName = pathSegs[pathSegs.size-3]
+                val apiUri = "https://api.github.com/repos/${owner}/${repoName}/issues/${issueNum}"
+
+                val inputStream = file!!.inputStream()
+                try {
+                    val note = Note.fromJson(inputStream)
+                    updateIssue(file!!.name.baseName() ?: "dummy",  apiUri, note!!)
+                } finally {
+                    inputStream.close()
+                }
+
+                return
+            } catch(e : NumberFormatException ) {
+                showMessage("Invalid URL.")
+                return
+            }
         }
         val owner = pathSegs[pathSegs.size-3]
         val repoName = pathSegs[pathSegs.size-2]
@@ -146,6 +163,68 @@ class UploaderActivity : AppCompatActivity() {
 
 
     }
+
+
+    data class IssueResult(val comments : Int)
+
+    enum class UpdateStatus {
+        NORMAL, FULL
+    }
+
+    private fun updateIssue(bookname: String, issueApiUrl: String, note: Note) {
+
+        val client = OkHttpClient()
+
+
+        val request = requestWithTokenBuilder()
+                .url(issueApiUrl)
+                .get()
+                .build()
+
+
+        val gson = Note.gson
+
+        Single.fromCallable { client.newCall(request).execute() }
+                .map {resp->
+                    val issueResult = gson.fromJson(resp.body()!!.string(), IssueResult::class.java)
+                    issueResult.comments
+                }
+                .map {
+                    val postedNum = it+1
+                    val cellNum = note.cells!!.size
+                    if (cellNum <= postedNum) {
+                        Pair(UpdateStatus.FULL, null)
+                    } else {
+                        val from = postedNum
+                        // currently, only support ADD NEW CELL.
+                        // do not check time stamp.
+                        // But I guess this is OK for most of real situation.
+                        val resp = postRest(client, issueApiUrl, note, from)
+                        Pair(UpdateStatus.NORMAL, resp)
+                    }
+                }
+                .subscribeOn(Schedulers.single())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe {
+                    (state, resps) ->
+                    when(state) {
+                        UpdateStatus.FULL-> {
+                            enablePost()
+                            showMessage("Already up to date.")
+                        }
+                        UpdateStatus.NORMAL-> {
+                            val webUrl = apiUrlToWebUrl(issueApiUrl)
+                            showUrlNotification(webUrl)
+                            enablePost()
+                            showMessage("update done.")
+                            finish()
+                        }
+                    }
+
+                }
+    }
+
+
 
     fun postMarkdownCell(client: OkHttpClient, commentUrl: String, cell : Cell) : Response {
         return postOneComment(client, cell.source, commentUrl)
@@ -230,8 +309,8 @@ class UploaderActivity : AppCompatActivity() {
         return  NullableResponse(postMarkdownCell(client, issueUrl+"/comments", cell))
     }
 
-    fun postRest(client: OkHttpClient, issueUrl: String, note: Note) : List<Response> {
-        return note.cells!!.slice(1 until note.cells.size)
+    fun postRest(client: OkHttpClient, issueUrl: String, note: Note,  from: Int = 1) : List<Response> {
+        return note.cells!!.slice(from until note.cells.size)
                 .filter { cell -> (cell.cellType == Cell.CellType.MARKDOWN) or (cell.cellType == Cell.CellType.CODE) }
                 .mapIndexed {
                     index, cell -> postCell(client, issueUrl, cell, index)
