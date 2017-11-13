@@ -25,6 +25,7 @@ import android.R.id.edit
 import android.content.Context
 import android.content.Intent
 import android.support.v7.app.NotificationCompat
+import java.io.InputStream
 
 
 fun String?.baseName() : String? {
@@ -37,7 +38,7 @@ fun String?.baseName() : String? {
 
 class UploaderActivity : AppCompatActivity() {
 
-    var file : File? = null
+    var fileUri : Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,9 +54,7 @@ class UploaderActivity : AppCompatActivity() {
             // Basically, uri is written in prefs. So we do not need arg_uri.
             // I use it just because of checking.so I do not store it.
 
-            val uri = Uri.parse(uristr)
-            file = File(uri.getPath())
-
+            fileUri = Uri.parse(uristr)
         }
 
         (findViewById(R.id.editTextUrl) as EditText).setText(prefs.getString("last_url", "https://github.com/"));
@@ -93,15 +92,24 @@ class UploaderActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        file?.let{ outState.putString("FILE_PATH", file.toString()) }
+        fileUri?.let{ outState.putString("FILE_PATH", fileUri!!.toString()) }
         super.onSaveInstanceState(outState)
     }
 
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
         super.onRestoreInstanceState(savedInstanceState)
         val filepath = savedInstanceState.getString("FILE_PATH", null)
-        filepath?.let{ file = File(filepath)}
+        filepath?.let{ fileUri = Uri.parse(filepath) }
     }
+
+    fun Uri.toName() = File(this.path).name
+
+    /*
+    fun openInputStream(uri : Uri) : InputStream {
+        val pfd = contentResolver.openFileDescriptor(uri, "r")
+        pfd.fileDescriptor
+    }
+    */
 
     private fun postToIssue() {
         val issueUrlStr = findETText(R.id.editTextUrl)
@@ -115,7 +123,7 @@ class UploaderActivity : AppCompatActivity() {
 
 
 
-        if(file == null) {
+        if(fileUri == null) {
             showMessage("No file selected.")
             return
         }
@@ -125,20 +133,14 @@ class UploaderActivity : AppCompatActivity() {
             return
         }
 
+        val note = readNote()
+
         if(pathSegs.last() != "issues") {
             try {
                 val issueNum = Integer.parseInt(pathSegs.last())
-                val owner = pathSegs[pathSegs.size-4]
-                val repoName = pathSegs[pathSegs.size-3]
-                val apiUri = "https://api.github.com/repos/${owner}/${repoName}/issues/${issueNum}"
-
-                val inputStream = file!!.inputStream()
-                try {
-                    val note = Note.fromJson(inputStream)
-                    updateIssue(file!!.name.baseName() ?: "dummy",  apiUri, note!!)
-                } finally {
-                    inputStream.close()
-                }
+                val owner = pathSegs[pathSegs.size-4]!!
+                val repoName = pathSegs[pathSegs.size-3]!!
+                updateIssue(owner, repoName, issueNum, note.cells!!)
 
                 return
             } catch(e : NumberFormatException ) {
@@ -149,18 +151,55 @@ class UploaderActivity : AppCompatActivity() {
         val owner = pathSegs[pathSegs.size-3]
         val repoName = pathSegs[pathSegs.size-2]
 
-        val apiUri = "https://api.github.com/repos/${owner}/${repoName}/issues"
 
-        val inputStream = file!!.inputStream()
+        val issueNoCand = tryGetSpecifiedIssueId(note)
+        if(issueNoCand == -1) {
+            val apiUri = "https://api.github.com/repos/${owner}/${repoName}/issues"
+
+            postToIssueInternal(fileUri!!.toName().baseName() ?: "dummy", apiUri, note)
+        } else {
+            val cells = note.cells!!
+            val fromSecond = cells.slice(1..cells.size-1)
+            updateIssue(owner, repoName, issueNoCand, fromSecond)
+        }
+
+
+    }
+
+    private fun tryGetSpecifiedIssueId(note: Note) : Int {
+        note.cells?.let {
+            if(note.cells.size < 1)
+                return -1
+            val first = note.cells[0]
+            if(first.cellType != Cell.CellType.MARKDOWN)
+                return -1
+            val content = first.source
+            val issueIdPat = """IssueId: *(\d+)""".toRegex()
+            val res = issueIdPat.matchEntire(content)
+            res?.let {
+                return res.groupValues[1].toInt()
+            }
+            return -1
+
+        }
+        return -1
+    }
+
+
+    private fun updateIssue(owner: String, repoName: String, issueNum: Int, cells: List<Cell>) {
+        val apiUri = "https://api.github.com/repos/${owner}/${repoName}/issues/${issueNum}"
+
+        updateIssue(fileUri!!.toName().baseName() ?: "dummy", apiUri, cells)
+    }
+
+    fun readNote() : Note {
+        val inputStream = contentResolver.openInputStream(fileUri)
         try {
             val note = Note.fromJson(inputStream)
-            postToIssueInternal(file!!.name.baseName() ?: "dummy",  apiUri, note)
-
-
+            return note!!
         } finally {
             inputStream.close()
         }
-
 
     }
 
@@ -171,7 +210,7 @@ class UploaderActivity : AppCompatActivity() {
         NORMAL, FULL
     }
 
-    private fun updateIssue(bookname: String, issueApiUrl: String, note: Note) {
+    private fun updateIssue(bookname: String, issueApiUrl: String, cells: List<Cell>) {
 
         val client = OkHttpClient()
 
@@ -191,7 +230,7 @@ class UploaderActivity : AppCompatActivity() {
                 }
                 .map {
                     val postedNum = it+1
-                    val cellNum = note.cells!!.size
+                    val cellNum = cells.size
                     if (cellNum <= postedNum) {
                         Pair(UpdateStatus.FULL, null)
                     } else {
@@ -199,7 +238,7 @@ class UploaderActivity : AppCompatActivity() {
                         // currently, only support ADD NEW CELL.
                         // do not check time stamp.
                         // But I guess this is OK for most of real situation.
-                        val resp = postRest(client, issueApiUrl, note, from)
+                        val resp = postRest(client, issueApiUrl, cells, from)
                         Pair(UpdateStatus.NORMAL, resp)
                     }
                 }
@@ -309,8 +348,8 @@ class UploaderActivity : AppCompatActivity() {
         return  NullableResponse(postMarkdownCell(client, issueUrl+"/comments", cell))
     }
 
-    fun postRest(client: OkHttpClient, issueUrl: String, note: Note,  from: Int = 1) : List<Response> {
-        return note.cells!!.slice(from until note.cells.size)
+    fun postRest(client: OkHttpClient, issueUrl: String, cells: List<Cell>,  from: Int = 1) : List<Response> {
+        return cells.slice(from until cells.size)
                 .filter { cell -> (cell.cellType == Cell.CellType.MARKDOWN) or (cell.cellType == Cell.CellType.CODE) }
                 .mapIndexed {
                     index, cell -> postCell(client, issueUrl, cell, index)
@@ -371,7 +410,7 @@ class UploaderActivity : AppCompatActivity() {
                 .map {
                     resp -> resp.header("Location")!!
                 }
-                .map { Pair(it, postRest(client, it, note)) }
+                .map { Pair(it, postRest(client, it, note.cells!!)) }
                 .subscribeOn(Schedulers.single())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe {
@@ -395,6 +434,12 @@ class UploaderActivity : AppCompatActivity() {
         return "https://github.com/$afterOwner"
     }
 
+    fun webUrlToIssueId(webUrl: String) : String {
+        val uri = Uri.parse(webUrl)
+        val segs = uri.pathSegments
+        return segs[segs.size-1]
+    }
+
     val NOTIFICATION_ID = 1
 
     private fun showUrlNotification(url: String) {
@@ -403,11 +448,18 @@ class UploaderActivity : AppCompatActivity() {
                 .setContentTitle("GistIpynb")
                 .setContentText(url)
 
+
+        val issueId = webUrlToIssueId(url)
+        val intentCopy = Intent(this, CopyIdReceiver::class.java)
+        intentCopy.putExtra("issueid", "IssueId:$issueId")
+        val piCopy = PendingIntent.getBroadcast(this, 1,intentCopy,  PendingIntent.FLAG_UPDATE_CURRENT)
+
+        builder.addAction(android.R.drawable.ic_menu_edit, "Id", piCopy);
+
+
         val intent = Intent(Intent.ACTION_VIEW)
         intent.data = Uri.parse(url)
-
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
-        // builder.addAction(android.R.drawable.ic_menu_edit, "Copy", pendingIntent);
         builder.setContentIntent(pendingIntent)
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

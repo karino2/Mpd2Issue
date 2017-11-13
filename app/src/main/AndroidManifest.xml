@@ -30,6 +30,11 @@
 
         </activity>
         <activity android:name=".UploaderActivity"></activity>
+        <receiver
+            android:name=".CopyIdReceiver"
+            android:enabled="true"
+            android:exported="true"></receiver>
+
     </application>
 
 </manifest>
