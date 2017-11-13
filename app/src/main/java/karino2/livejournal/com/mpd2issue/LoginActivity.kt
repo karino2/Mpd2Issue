@@ -242,7 +242,14 @@ class LoginActivity : AppCompatActivity() {
 
         val intent = Intent(this, UploaderActivity::class.java)
         intent.action = Intent.ACTION_SEND
+
+        // Granted uri is only accsessible one hop, so I need to to grant this url for another hop.
+        val uri = Uri.parse(urival)
+        intent.setData(uri)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
         intent.putExtra("uri_arg", urival)
+
         startActivity(intent)
         finish()
     }
