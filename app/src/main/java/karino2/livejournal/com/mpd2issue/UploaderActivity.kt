@@ -59,6 +59,18 @@ class UploaderActivity : AppCompatActivity() {
 
         (findViewById(R.id.editTextUrl) as EditText).setText(prefs.getString("last_url", "https://github.com/"));
 
+        if(prefs.getBoolean("auto_send", false)){
+            prefs.edit()
+                    .putBoolean("auto_send", false)
+                    .commit()
+
+            showMessage("posting...")
+            duringPost = true
+            invalidateOptionsMenu()
+            postToIssue()
+            return
+        }
+
     }
 
     var duringPost = false

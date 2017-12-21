@@ -52,6 +52,7 @@ class LoginActivity : AppCompatActivity() {
             if(intent.action == Intent.ACTION_MAIN) {
                 prefs.edit()
                         .remove("url_arg")
+                        .putBoolean("auto_send", false)
                         .commit()
             } else if (intent.action == Intent.ACTION_SEND) {
                 val uri = intent.getParcelableExtra<Uri?>(Intent.EXTRA_STREAM)
@@ -62,6 +63,7 @@ class LoginActivity : AppCompatActivity() {
                 }
                 prefs.edit()
                         .putString("uri_arg", uri.toString())
+                        .putBoolean("auto_send", true)
                         .commit()
             }
         }
